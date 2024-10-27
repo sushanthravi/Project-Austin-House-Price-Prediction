@@ -1,0 +1,410 @@
+---
+title: 'Individual Project '
+author: "Sushanth Ravichandran-sr56925"
+date: "2024-08-02"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r echo=FALSE}
+df <- read.csv("C:/Users/Lenovo/Downloads/Intro to Machine Learning/Individual Project/austinhouses.csv")
+
+
+#Creating New Features
+
+df$houseage = df$latest_saleyear- df$yearBuilt
+
+df$totalfeatures=df$numOfAccessibilityFeatures+df$numOfAppliances+df$numOfParkingFeatures+df$numOfPatioAndPorchFeatures+df$numOfSecurityFeatures+df$numOfWaterfrontFeatures+df$numOfWindowFeatures+df$numOfCommunityFeatures
+
+df$bedbath=df$numOfBathrooms*df$numOfBedrooms
+
+df$lotSizeSqFt=log(df$lotSizeSqFt)
+
+df$livingAreaSqFt =log(df$livingAreaSqFt)         
+
+df$description_length <- sapply(strsplit(df$description, " "), length)
+
+
+df <- df[, !names(df) %in% c("streetAddress", "description","homeType")]
+
+df <- df[, !names(df) %in% c("latest_saledate", "longitude","latitude","yearBuilt","price_per_sqft")]
+
+df <- df[, !names(df) %in% c("latest_salemonth", "latest_saleyear","numOfAccessibilityFeatures","numOfAppliances","numOfParkingFeatures","numOfPatioAndPorchFeatures","numOfSecurityFeatures","numOfWaterfrontFeatures","numOfWindowFeatures","numOfCommunityFeatures")]
+
+
+
+library(MASS)
+library(tinytex)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(tree)
+library(MASS)
+library(readr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+
+set.seed(18)
+
+```
+
+```{r echo=FALSE}
+df <- df %>%
+  mutate(across(c(hasAssociation, hasGarage, hasSpa, hasView), as.factor),)
+                  
+str(df)
+
+#df$price_per_sqft <- df$latestPrice / df$livingAreaSqFt
+
+```
+```{r echo=FALSE}
+# Hold out 20% of the data as a final validation set
+train_ix = createDataPartition(df$latestPrice,
+                               p = 0.80)
+
+df_train = df[train_ix$Resample1,]
+df_test  = df[-train_ix$Resample1,]
+```
+
+
+
+###########################################################################
+# Setup cross-validation
+###########################################################################
+```{r echo=FALSE}
+kcv = 10
+cv_folds = createFolds(df_train$latestPrice,
+                               k = kcv)
+fit_control <- trainControl(
+  method = "cv",
+  indexOut = cv_folds,
+  selectionFunction="oneSE")
+```
+###########################################################################
+# Boosting
+###########################################################################
+
+```{r echo=FALSE}
+# Boosting, optimizing over default grid for number of trees and depth
+gbmfit <- train( latestPrice ~ ., data = df_train, 
+                 method = "gbm", 
+                 trControl = fit_control,
+                 verbose = FALSE)
+
+print(gbmfit)
+plot(gbmfit)
+```
+
+```{r echo=FALSE}
+gbm_grid <-  expand.grid(interaction.depth = c(5, 10), 
+                        n.trees = c(150, 500, 750 ), 
+                        shrinkage = c(0.01, 0.1, 0.2),
+                        n.minobsinnode = 20)
+
+gbmfit_2 <- train(latestPrice ~ ., data = df_train, 
+                 method = "gbm", 
+                 trControl = fit_control,
+                 tuneGrid = gbm_grid,
+                 verbose = FALSE)
+
+print(gbmfit_2)
+plot (gbmfit_2)
+
+# Table of results including std dev
+print(gbmfit_2$results)
+
+# Determine the max RMSE that's within one SE of best
+best_ix = which.min(gbmfit_2$results$RMSE)
+best = gbmfit_2$results[best_ix,]
+onese_max_RMSE = best$RMSE + best$RMSESD/sqrt(kcv)
+
+# These are the parameter values within one SD:
+onese_ixs = gbmfit_2$results$RMSE<onese_max_RMSE
+
+print(gbmfit_2$results[onese_ixs,])
+
+
+
+# Plot within one SD:
+gbm_plot_df = gbmfit_2$results
+gbm_plot_df$n.trees = factor(gbm_plot_df$n.trees)
+
+ggplot(aes(x=interaction.depth, y=RMSE, color=n.trees), 
+       data=gbm_plot_df) +
+  facet_grid(~shrinkage, labeller = label_both) +
+  geom_point() + 
+  geom_line() + 
+  geom_segment(aes(x=interaction.depth, 
+                   xend=interaction.depth, 
+                   y=RMSE-RMSESD/sqrt(kcv), 
+                   yend=RMSE+RMSESD/sqrt(kcv))) + 
+  geom_hline(yintercept = onese_max_RMSE, linetype='dotted') +
+  xlab("Max Tree Depth") + 
+  ylab("RMSE (CV)") + 
+  scale_color_discrete(name = "Num Boosting Iter") + 
+  theme(legend.position="bottom") 
+```
+
+###########################################################################
+# Random forests
+###########################################################################
+
+```{r echo=FALSE}
+# Optimizing over a default mtry grid
+rf_fit1 <- train( latestPrice ~ ., data = df_train, 
+                 method = "rf", 
+                 trControl = fit_control,
+                 # parameter ntree below is passed to 
+                 # the randomForest function call
+                 ntree = 150)
+ggplot(rf_fit1)
+print(rf_fit1$results)
+```
+```{r echo=FALSE}
+rf_grid = data.frame(mtry = c(7,11,15))
+rf_fit <- train( latestPrice ~ ., data = df_train, 
+                 method = "rf", 
+                 trControl = fit_control,
+                 tuneGrid = rf_grid,
+                 ntree = 150)
+
+```
+```{r echo=FALSE}
+ggplot(rf_fit)
+
+best = rf_fit$results[which.min(rf_fit$results$RMSE),]
+onesd = best$RMSE + best$RMSESD/sqrt(kcv)
+
+ggplot(rf_fit) + 
+  geom_segment(aes(x=mtry, 
+                   xend=mtry, 
+                   y=RMSE-RMSESD/sqrt(kcv), 
+                   yend=RMSE+RMSESD/sqrt(kcv)), 
+               data=rf_fit$results) + 
+  geom_hline(yintercept = onesd, linetype='dotted')
+
+print(rf_fit$results)
+```
+```{r echo=FALSE}
+### Variable importance
+
+# From caret, for methods that support it
+
+imp = varImp(rf_fit, scale=TRUE)
+ggplot(imp)
+
+# Recreating the randomForest importance plot by hand
+plot_df = data.frame(variable=rownames(imp$importance),
+                     rel_importance = imp$importance$Overall)
+ggplot(aes(x=reorder(variable, rel_importance), 
+           y=rel_importance), data=plot_df) + 
+  geom_point() + 
+  ylab("Relative importance (RF)") + 
+  xlab("Variable") + 
+  coord_flip()
+
+# Same as from the randomForest package directly!
+varImp(rf_fit$finalModel, scale=FALSE)
+varImpPlot(rf_fit$finalModel)
+
+```
+
+```{r echo=FALSE}
+library(gbm)
+##################################################################
+# Comparing RF and Boosting...
+##################################################################
+
+# On our validation set:
+
+gbm_yhat = predict(gbmfit_2, newdata=df_test)
+rf_yhat  = predict(rf_fit,   newdata=df_test)
+
+
+# Predicted values are very, very similar!
+plot(gbm_yhat, rf_yhat)
+cor(gbm_yhat, rf_yhat)
+
+abline(0,1)
+
+# So is validation RMSE
+print("The RMSE for GBM and Random Forest are as follows:")
+sqrt(mean( (df_test$latestPrice - gbm_yhat)^2 ))
+sqrt(mean( (df_test$latestPrice - rf_yhat)^2 ))
+
+# Comparing variable importance
+gbm_imp = varImp(gbmfit_2)
+rf_imp  = varImp(rf_fit)
+combined_df = data.frame(variable=rownames(gbm_imp$importance),
+                         gbm = gbm_imp$importance$Overall,
+                         rf  = rf_imp$importance$Overall)
+print(combined_df)
+
+```
+
+
+```{r echo=FALSE}
+
+###########################################################################
+# Single tree
+###########################################################################
+
+rpart_grid = data.frame(cp = c(0, exp(seq(log(0.00001), log(0.03), length.out=20))))
+single_tree_fit <- train( latestPrice ~ ., data = df_train, 
+                          method = "rpart", 
+                          tuneGrid = rpart_grid,
+                          trControl = fit_control)
+# Extract the final fit
+single_tree_fit$finalModel
+rpart.plot(single_tree_fit$finalModel)
+
+# For this very special case, it's faster/more efficient to just use rpart
+
+set.seed(1)
+bigtree = rpart(latestPrice ~ ., data = df_train,
+                control = rpart.control(cp=0.0009, minsplit=5))
+plotcp(bigtree)
+printcp(bigtree)
+best_cp_ix = which.min(bigtree$cptable[,4]) # "Best"
+bigtree$cptable[best_cp_ix,4]
+
+# one sd rule
+tol = bigtree$cptable[best_cp_ix,4] + bigtree$cptable[best_cp_ix,5]
+bigtree$cptable[bigtree$cptable[,4]<tol,][1,]
+best_cp_onesd = bigtree$cptable[bigtree$cptable[,4]<tol,][1,1]
+cvtree = prune(bigtree, cp=best_cp_onesd)
+
+# # Different looking trees -- mostly due to different CV folds -- 
+# # but very similar predictions!
+# plot(predict(cvtree), predict(single_tree_fit$finalModel))
+# abline(0,1)
+# # Jittering the predictions a little so they aren't on top of each other
+# plot(predict(cvtree)+runif(nrow(df_train), -0.5,  0.5), 
+#      predict(single_tree_fit$finalModel)+runif(nrow(df_train), -0.5,  0.5))
+# abline(0,1)
+# 
+# cor(predict(cvtree), predict(single_tree_fit$finalModel))
+
+```
+```{r echo=FALSE}
+###########################################################################
+# Linear Regression
+###########################################################################
+
+#MLR on train data set and all independent variables
+set.seed(18)
+
+result <- lm(latestPrice~.,data=df_train)
+summary(result)
+
+# #Stepwise regression & feature selection
+# stepwise_interaction = step(lm(latestPrice~(.)^2, data=df_train),
+#                      direction="both",
+#                      scope = ~.)
+# summary(stepwise_interaction)
+
+
+```
+```{r echo=FALSE}
+##################################################################
+# Comparing Linear Regression, Regression tree, RF & Boosting
+##################################################################
+
+lin_yhat = predict(result,newdata=df_test)
+rt_yhat = predict(cvtree,newdata=df_test)
+rf_yhat  = predict(rf_fit,newdata=df_test)
+gbm_yhat = predict(gbmfit_2, newdata=df_test)
+
+
+# Test RMSE
+
+lin_rmse <- sqrt(mean((df_test$latestPrice - lin_yhat)^2))
+rt_rmse <- sqrt(mean((df_test$latestPrice - rt_yhat)^2))
+rf_rmse <- sqrt(mean((df_test$latestPrice - rf_yhat)^2))
+gbm_rmse <- sqrt(mean((df_test$latestPrice - gbm_yhat)^2))
+```
+
+```{r echo=FALSE}
+#RMSE plot
+rmse_values <- data.frame(
+  Model = c("Linear Regression", "Regression Tree", "Random Forest", "Gradient Boosting"),
+  RMSE = c(lin_rmse, rt_rmse, rf_rmse, gbm_rmse)
+)
+
+ggplot(rmse_values, aes(x = Model, y = RMSE, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.5) +  # Reduce the width of the bars
+  geom_text(aes(label = round(RMSE, 2)), vjust = -0.3, size = 3) +  # Add values on top of the bars
+  theme_minimal() +
+  labs(title = "RMSE Comparison of Different Models",
+       x = "Model",
+       y = "RMSE") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+  
+
+```{r echo=FALSE}
+
+df2 <- read.csv("C:/Users/Lenovo/Downloads/Intro to Machine Learning/Individual Project/austinhouses_holdout.csv")
+
+library(MASS)
+library(tinytex)
+library(tidyverse)
+library(dplyr)
+library(lubridate)
+library(tree)
+library(MASS)
+library(readr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+
+# Creating New Features
+
+df2$houseage = df2$latest_saleyear - df2$yearBuilt
+
+df2$totalfeatures = df2$numOfAccessibilityFeatures + df2$numOfAppliances + df2$numOfParkingFeatures + df2$numOfPatioAndPorchFeatures + df2$numOfSecurityFeatures + df2$numOfWaterfrontFeatures + df2$numOfWindowFeatures + df2$numOfCommunityFeatures
+
+df2$bedbath = df2$numOfBathrooms * df2$numOfBedrooms
+
+df2$lotSizeSqFt = log(df2$lotSizeSqFt)
+
+df2$livingAreaSqFt = log(df2$livingAreaSqFt)
+
+df2$description_length = sapply(strsplit(df2$description, " "), length)
+
+View(df2)
+
+df2 <- df2[, !names(df2) %in% c("streetAddress", "description", "homeType")]
+
+df2 <- df2[, !names(df2) %in% c("latest_saledate", "longitude", "latitude", "yearBuilt", "price_per_sqft")]
+
+df2 <- df2[, !names(df2) %in% c("latest_salemonth", "latest_saleyear", "numOfAccessibilityFeatures", "numOfAppliances", "numOfParkingFeatures", "numOfPatioAndPorchFeatures", "numOfSecurityFeatures", "numOfWaterfrontFeatures", "numOfWindowFeatures", "numOfCommunityFeatures")]
+
+View(df2)
+
+set.seed(18)
+
+```
+
+
+```{r echo=FALSE}
+df2 <- df2 %>%
+  mutate(across(c(hasAssociation, hasGarage, hasSpa, hasView), as.factor),)
+                  
+str(df2)
+
+#df$price_per_sqft <- df$latestPrice / df$livingAreaSqFt
+
+```
+```{r echo=FALSE}
+predicted_prices <- predict(rf_fit, newdata = df2)
+predictions_df <- data.frame(PredictedPrice = predicted_prices)
+
+write_csv(predictions_df, "predicted_prices.csv")
+
+```
+
