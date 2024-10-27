@@ -1,32 +1,11 @@
----
-title: "Project: Austin House Price Prediction"
-author: "Your Name"
-date: "2024-10-27"
-output: html_document
----
+# Project-Austin-House-Price-Prediction
 
-# Project Overview
-This project involves predicting house prices in Austin, Texas, using machine learning algorithms. The dataset includes various housing characteristics, ranging from structural details to amenities.
+This project involves predicting house prices in Austin, Texas, using machine learning algorithms. The dataset includes housing characteristics, from structural details to amenities.
 
 ## Key Steps
 
-### 1. Feature Engineering
-We created additional custom features to enhance the predictive power of the models:
-- House Age: Calculated from the difference between the year built and the current year.
-- Total Features: Combined important features such as square footage and number of rooms.
-- Bedroom-Bathroom Count: Created a combined feature for bedrooms and bathrooms to capture the living space layout.
+- **Feature Engineering**: Added custom features like house age, total features, and combined bedroom-bathroom count to enrich the dataset.
+- **Data Splitting & Cross-Validation**: Used an 80/20 split for training and testing, applying k-fold cross-validation (k=10).
+- **Modeling**: Built multiple predictive models—Linear Regression, Regression Tree, Random Forest, and Gradient Boosting—to identify the best-performing algorithm.
+- **Evaluation**: Compared models based on Root Mean Square Error (RMSE), visualizing results to assess accuracy.
 
-### 2. Data Splitting & Cross-Validation
-We split the dataset into an 80/20 ratio for training and testing. To ensure robust model performance, we used 10-fold cross-validation (k = 10).
-
-```{r}
-# Example code for data splitting and cross-validation
-set.seed(123)
-trainIndex <- createDataPartition(dataset$Price, p = .8, 
-                                  list = FALSE, 
-                                  times = 1)
-trainData <- dataset[trainIndex,]
-testData  <- dataset[-trainIndex,]
-
-# K-fold cross-validation
-control <- trainControl(method = "cv", number = 10)
